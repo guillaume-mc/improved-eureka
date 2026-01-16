@@ -1,5 +1,8 @@
 package com.mastercard.foundry.template.webapp;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import com.mastercard.foundry.template.service.Pet;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,8 +47,8 @@ public class PetControllerTest {
         .expectStatus().isOk()
         .expectBody(Pet.class)
         .value(pet -> {
-          assert pet.getId().equals(1L);
-          assert pet.getName().equals("Buddy");
+          assertEquals(1L, pet.getId());
+          assertEquals("Buddy", pet.getName());
         });
   }
 
@@ -79,9 +82,9 @@ public class PetControllerTest {
         .expectStatus().isCreated()
         .expectBody(Pet.class)
         .value(pet -> {
-          assert pet.getId() != null;
-          assert pet.getName().equals("Max");
-          assert pet.getSpecies().equals("Dog");
+          assertNotNull(pet.getId());
+          assertEquals("Max", pet.getName());
+          assertEquals("Dog", pet.getSpecies());
         });
   }
 
@@ -104,8 +107,8 @@ public class PetControllerTest {
         .expectStatus().isOk()
         .expectBody(Pet.class)
         .value(pet -> {
-          assert pet.getId().equals(1L);
-          assert pet.getName().equals("Buddy Updated");
+          assertEquals(1L, pet.getId());
+          assertEquals("Buddy Updated", pet.getName());
         });
   }
 
