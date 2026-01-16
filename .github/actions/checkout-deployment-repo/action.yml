@@ -1,0 +1,51 @@
+name: 'Checkout Deployment Repository'
+description: 'Checkout a deployment repository using GitHub App credentials stored in Azure Key Vault'
+
+inputs:
+  deployment-repo-name:
+    description: 'Deployment repository name to checkout'
+    required: true
+  organization:
+    description: 'GitHub organization name'
+    required: true
+  az-keyvault-name:
+    description: 'Azure Key Vault name to retrieve secrets from'
+    required: true
+  az-secret-gh-app-id:
+    description: 'Secret name for GitHub App ID in Azure Key Vault'
+    required: true
+  az-secret-gh-app-private-key:
+    description: 'Secret name for GitHub App Private Key in Azure Key Vault'
+    required: true
+
+outputs:
+  checkout-path:
+    description: 'Path where the repository was checked out'
+    value: ${{ inputs.deployment-repo-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Fetch secrets
+      id: secrets
+      uses: mastercardlabs/sparkpoc-ci-cd/.github/actions/fetch-secrets@main
+      with:
+        az-keyvault-name: ${{ inputs.az-keyvault-name }}
+        secret-keys: |
+          gh-app-id=${{ inputs.az-secret-gh-app-id }}
+          gh-app-private-key=${{ inputs.az-secret-gh-app-private-key }}
+
+    - name: Generate GitHub App token to checkout deployment repository
+      id: app-token
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ fromJson(steps.secrets.outputs.secret-values)['gh-app-id'] }}
+        private-key: ${{ fromJson(steps.secrets.outputs.secret-values)['gh-app-private-key'] }}
+        repositories: ${{ inputs.deployment-repo-name }}
+
+    - name: Checkout deployment repository
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.organization }}/${{ inputs.deployment-repo-name }}
+        token: ${{ steps.app-token.outputs.token }}
+        path: ${{ inputs.deployment-repo-name }}

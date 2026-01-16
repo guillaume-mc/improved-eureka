@@ -1,0 +1,49 @@
+name: 'Build, validate and publish docker image'
+
+inputs:
+  context:
+    description: 'The folder to use for building the docker image'
+    default: .
+    required: true
+  dockerfile:
+    description: 'The Dockerfile to use to build the docker image'
+    required: false
+  prisma-url:
+    description: 'The URL for the Prisma Scan service, will be fetched from az-keyvault'
+    required: true
+  prisma-username:
+    description: 'The Username for the Prisma Scan service, will be fetched from az-keyvault'
+    required: true
+  prisma-password:
+    description: 'The Password for the Prisma Scan service, will be fetched from az-keyvault'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Build Docker Image
+      uses: docker/build-push-action@v6
+      with:
+        context: ${{ inputs.context }}
+        file: ${{ inputs.dockerfile || format('{0}/Dockerfile.default', github.action_path) }}
+        push: false
+        tags: ${{ github.event.repository.name }}:${{ github.sha }}
+
+    - name: Prisma Cloud Security Scan
+      #if: ${{ inputs.skip-prisma-scan == false }}
+      continue-on-error: true
+      id: security-scan
+      uses: PaloAltoNetworks/prisma-cloud-scan@v1.5
+      with:
+        pcc_console_url: ${{ inputs.prisma-url }}
+        pcc_user: ${{ inputs.prisma-username }}
+        pcc_pass: ${{ inputs.prisma-password }}
+        image_name: ${{ github.event.repository.name }}:${{ github.sha }}
+
+#    - name: Publish Docker Image to Artifactory
+#      uses: docker/build-push-action@v6
+#      with:
+#        context: ${{ inputs.context }}
+#        file: ${{ inputs.dockerfile || format('{0}/Dockerfile.default', github.action_path) }}
+#        push: true
+#        tags: ${{ needs.get-constants.outputs.artifactory-docker-path }}/${{ github.event.repository.name }}:${{ github.sha }}

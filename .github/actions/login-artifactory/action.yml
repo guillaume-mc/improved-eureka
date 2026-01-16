@@ -1,0 +1,50 @@
+name: 'Login to Artifactory'
+description: 'Retrieve credentials from Azure KeyVault and login to Artifactory Docker Registry'
+
+inputs:
+  az-keyvault-name:
+    description: 'Azure Key Vault name to retrieve secrets from'
+    required: true
+  az-secret-artifactory-url:
+    description: 'Secret name for Artifactory URL in Azure Key Vault'
+    required: true
+  az-secret-artifactory-username:
+    description: 'Secret name for Artifactory username in Azure Key Vault'
+    required: true
+  az-secret-artifactory-token:
+    description: 'Secret name for Artifactory token in Azure Key Vault'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Retrieve Artifactory URL from Azure Key Vault
+      id: get-artifactory-url
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-artifactory-url }}
+          
+    - name: Retrieve Artifactory username from Azure Key Vault
+      id: get-artifactory-username
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-artifactory-username }}
+          
+    - name: Retrieve Artifactory token from Azure Key Vault
+      id: get-artifactory-token
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-artifactory-token }}
+
+    - name: Log in to Artifactory Docker Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ steps.get-artifactory-url.outputs.AZURE_SECRET }}
+        username: ${{ steps.get-artifactory-username.outputs.AZURE_SECRET }}
+        password: ${{ steps.get-artifactory-token.outputs.AZURE_SECRET }}

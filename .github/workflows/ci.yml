@@ -1,0 +1,156 @@
+name: Java Maven CI Workflow
+
+permissions:
+  id-token: write
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+  workflow_call:
+    inputs:
+      skip-sonarqube-quality-gate:
+        description: 'Skip SonarQube quality gate check'
+        required: false
+        default: false
+        type: boolean
+      skip-prisma-scan:
+        description: 'Skip Prisma Cloud security scan'
+        required: false
+        default: false
+        type: boolean
+      maven-args:
+        description: 'Additional Maven arguments'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  get-cluster:
+    uses: mastercardlabs/sparkpoc-ci-cd/.github/workflows/get-cluster.yml@main
+
+  get-constants:
+    needs: [get-cluster]
+    uses: mastercardlabs/sparkpoc-ci-cd/.github/workflows/get-constants.yml@main
+    with:
+      environment: ${{ needs.get-cluster.outputs.environment }}
+
+  get-runner:
+    needs: [get-constants]
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.get-runner.outputs.runner }}
+    steps:
+      - name: Determine Runner
+        id: get-runner
+        run: echo "runner=mint-gha-runner-scaleset" >> $GITHUB_OUTPUT
+
+  ci-pipeline:
+    needs: [get-runner, get-constants, get-cluster]
+    runs-on: ${{ needs.get-runner.outputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Application Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for better relevancy of SonarQube analysis
+
+      - name: Azure Login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ needs.get-constants.outputs.az-client-id }}
+          tenant-id: ${{ needs.get-constants.outputs.az-tenant-id }}
+          subscription-id: ${{ needs.get-constants.outputs.az-subscription-id }}
+
+      - name: Checkout Deployment Repository
+        id: checkout-deployment-repo
+        uses: ./.github/actions/checkout-deployment-repo
+        with:
+          deployment-repo-name: ${{ needs.get-constants.outputs.deployment-repo-name }}
+          organization: ${{ needs.get-constants.outputs.organization }}
+          az-keyvault-name: ${{ needs.get-constants.outputs.az-keyvault-name }}
+          az-secret-gh-app-id: ${{ needs.get-constants.outputs.az-secret-gh-app-id }}
+          az-secret-gh-app-private-key: ${{ needs.get-constants.outputs.az-secret-gh-app-private-key }}
+
+      - name: Create Config Files
+        uses: mastercardlabs/sparkpoc-ci-cd/.github/actions/create-config-files@main
+        with:
+          checkout-path: ${{ steps.checkout-deployment-repo.outputs.checkout-path }}
+          project-name: ${{ github.event.repository.name }}
+
+      - name: Fetch secrets
+        id: secrets
+        uses: ./.github/actions/fetch-secrets
+        with:
+          az-keyvault-name: ${{ needs.get-constants.outputs.az-keyvault-name }}
+          secret-keys: |
+            artifactory-user-name=${{ needs.get-constants.outputs.az-secret-artifactory-user-name }}
+            artifactory-user-access-token=${{ needs.get-constants.outputs.az-secret-artifactory-user-access-token }}
+
+      - name: Configure JFrog
+        run: |
+          jf c add maven \
+            --url https://artifactorytest.forge.mastercard.com \
+            --user ${{ fromJson(steps.secrets.outputs.secret-values)['artifactory-user-name'] }} \
+            --access-token ${{ fromJson(steps.secrets.outputs.secret-values)['artifactory-user-access-token'] }}
+          jf mvn-config \
+            --server-id-deploy maven \
+            --repo-deploy-releases maven-local \
+            --repo-deploy-snapshots maven-local
+      # TODO the value maven-local should be configurable
+
+      - name: Log in to Forge Artifactory Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: artifactorytest.forge.mastercard.com/docker-hub
+          username: ${{ fromJson(steps.secrets.outputs.secret-values)['artifactory-user-name'] }}
+          password: ${{ fromJson(steps.secrets.outputs.secret-values)['artifactory-user-access-token'] }}
+
+      - name: Build Project
+        run: mvn -ntp clean package -DskipTests ${{ inputs.maven-args }}
+
+      - name: Run Tests
+        run: mvn -ntp test
+
+      - name: Install modules
+        run: mvn -ntp install
+
+      - name: Linting Check
+        run: mvn -ntp checkstyle:check
+
+      - name: Generate Checkstyle Report
+        run: mvn -ntp checkstyle:checkstyle
+
+      - name: Docker image
+        uses: ./.github/actions/docker-image
+        with:
+          context: webapp
+          prisma-url: ${{ secrets.PRISMA_URL }}
+          prisma-username: ${{ secrets.PRISMA_USERNAME }}
+          prisma-password: ${{ secrets.PRISMA_PASSWORD }}
+
+#      - name: SonarQube Analysis
+#        id: sonarqube-analysis
+#        uses: mastercardlabs/sparkpoc-ci-cd/.github/actions/sonarqube-scan@main
+#        with:
+#          az-keyvault-name: ${{ needs.get-constants.outputs.az-keyvault-name }}
+#          az-secret-sonarqube-url: ${{ needs.get-constants.outputs.az-secret-sonarqube-url }}
+#          az-secret-sonarqube-token: ${{ needs.get-constants.outputs.az-secret-sonarqube-user-access-token }}
+#          project-name: ${{ github.event.repository.name }}
+#          scanner-version: ${{ needs.get-constants.outputs.scanner-version }}
+#          scanner-binaries-url: ${{ needs.get-constants.outputs.scanner-binaries-url }}
+#          skip-quality-gate: ${{ inputs.skip-sonarqube-quality-gate }}
+
+      - name: Publish Library
+        run: jf mvn -ntp deploy --projects .,service
+
+      - name: Summarize Workflow Results
+        if: always()
+        run: |
+          echo "## CI Workflow Summary" >> $GITHUB_STEP_SUMMARY
+          echo "* **Repository**: ${{ github.event.repository.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **Environment**: ${{ needs.get-cluster.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "* **Cluster**: ${{ needs.get-cluster.outputs.cluster }}" >> $GITHUB_STEP_SUMMARY

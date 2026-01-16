@@ -1,0 +1,97 @@
+name: Deploy to ArgoCD
+description: Retrieves secrets from Azure Key Vault and deploys application using ArgoCD
+
+inputs:
+  az-keyvault-name:
+    description: 'Name of the Azure Key Vault'
+    required: true
+  az-secret-argocd-url:
+    description: 'Name of the secret containing ArgoCD URL'
+    required: true
+  az-secret-argocd-username:
+    description: 'Name of the secret containing ArgoCD username'
+    required: true
+  az-secret-argocd-password:
+    description: 'Name of the secret containing ArgoCD password'
+    required: true
+  repo-name:
+    description: 'Name of the repository'
+    required: true
+  deployment-repo-url:
+    description: 'Url of the deployment repository'
+    required: true
+  cluster:
+    description: 'Cluster path'
+    required: true
+  image-tag:
+    description: 'Image tag to deploy'
+    required: true
+  verify-deployment:
+    description: 'Whether to verify the deployment'
+    default: 'true'
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - name: Retrieve ArgoCD URL from Azure Key Vault
+      id: get-argocd-url
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-argocd-url }}
+          
+    - name: Retrieve ArgoCD username from Azure Key Vault
+      id: get-argocd-username
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-argocd-username }}
+          
+    - name: Retrieve ArgoCD password from Azure Key Vault
+      id: get-argocd-password
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-argocd-password }}
+          
+    - name: Trigger ArgoCD Deployment
+      id: deploy
+      shell: bash
+      run: |
+        echo "Initiating ArgoCD deployment for cluster: ${{ inputs.cluster }}"
+        echo "Application: ${{ inputs.repo-name }}"
+        echo "Image tag: ${{ inputs.image-tag }}"
+        
+        echo "Login into ArgoCD server..."
+        argocd login ${{ steps.get-argocd-url.outputs.AZURE_SECRET }} --username ${{ steps.get-argocd-username.outputs.AZURE_SECRET }} --password ${{ steps.get-argocd-password.outputs.AZURE_SECRET }} --grpc-web
+
+        sleep 5s
+
+        echo "Create or update ArgoCD application..."
+        argocd app create ${{ inputs.repo-name }} \
+          --repo ${{ inputs.deployment-repo-url }} \
+          --path manifests/${{ inputs.cluster }}/${{ inputs.repo-name }} \
+          --dest-server https://kubernetes.default.svc \
+          --dest-namespace argocd \
+          --project default \
+          --sync-policy automated \
+          --revision HEAD \
+          --sync-option CreateNamespace=true \
+          --upsert \
+          --grpc-web
+
+        sleep 5s
+
+        echo "Deploying ArgoCD application..."
+        argocd app sync ${{ inputs.repo-name }} --async --prune
+        
+    - name: Verify Deployment
+      if: ${{ inputs.verify-deployment == 'true' }}
+      shell: bash
+      run: |
+        echo "Verifying deployment status..."
+        argocd app wait ${{ inputs.repo-name }} --health --timeout 900

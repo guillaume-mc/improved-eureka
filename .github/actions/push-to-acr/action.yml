@@ -1,0 +1,72 @@
+name: 'Push Docker Image to Azure Container Registry'
+description: 'Retrieves ACR credentials from Key Vault, logs in, and pushes Docker images to Azure Container Registry'
+
+inputs:
+  az-keyvault-name:
+    description: 'Azure Key Vault name where secrets are stored'
+    required: true
+  az-secret-acr-url:
+    description: 'Secret name for ACR URL in Azure Key Vault'
+    required: true
+  az-secret-acr-username:
+    description: 'Secret name for ACR username in Azure Key Vault'
+    required: true
+  az-secret-acr-password:
+    description: 'Secret name for ACR password in Azure Key Vault'
+    required: true
+  image-source:
+    description: 'The full path of the source image including repository and tag'
+    required: true
+  acr-registry-path:
+    description: 'ACR registry path for tagging the image'
+    required: true
+  repository-name:
+    description: 'The repository name for the image'
+    required: true
+  image-tag:
+    description: 'The tag for the image'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Retrieve ACR URL from Azure Key Vault
+      id: get-acr-url
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-acr-url }}
+          
+    - name: Retrieve ACR username from Azure Key Vault
+      id: get-acr-username
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-acr-username }}
+          
+    - name: Retrieve ACR password from Azure Key Vault
+      id: get-acr-password
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-acr-password }}
+    
+    - name: Log in to Azure Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ steps.get-acr-url.outputs.AZURE_SECRET }}
+        username: ${{ steps.get-acr-username.outputs.AZURE_SECRET }}
+        password: ${{ steps.get-acr-password.outputs.AZURE_SECRET }}
+
+    - name: Push Docker Image to Azure Container Registry
+      shell: bash
+      run: |
+        # Tag and push the image to ACR
+        echo "Tagging image for Azure Container Registry"
+        docker tag ${{ inputs.image-source }} ${{ inputs.acr-registry-path }}/${{ inputs.repository-name }}:${{ inputs.image-tag }}
+        
+        echo "Pushing image to Azure Container Registry"
+        docker push ${{ inputs.acr-registry-path }}/${{ inputs.repository-name }}:${{ inputs.image-tag }}

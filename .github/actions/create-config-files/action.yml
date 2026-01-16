@@ -1,0 +1,20 @@
+name: 'Create Config Files'
+description: 'Generates configuration files from templates (maven-settings, Dockerfile, sonar-project)'
+inputs:
+  checkout-path:
+    description: 'Path to the checked out deployment repository'
+    required: true
+  project-name:
+    description: 'Name of the project to use in configuration files'
+    required: true
+    default: ${{ github.event.repository.name }}
+runs:
+  using: "composite"
+  steps:
+    - name: Generate Configuration Files
+      shell: bash
+      run: |
+        # Copy and configure build files from template repository
+        cp ${{ inputs.checkout-path }}/ci-cd/Dockerfile-template Dockerfile
+        cp ${{ inputs.checkout-path }}/ci-cd/sonar-project-template.properties sonar-project.properties
+        sed -i "s#{{PROJECT_NAME}}#${{ inputs.project-name }}#" sonar-project.properties

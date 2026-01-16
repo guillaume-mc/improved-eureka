@@ -1,0 +1,45 @@
+name: 'Fetch Secret from Azure Keyvault'
+
+inputs:
+  az-keyvault-name:
+    description: 'Name of the Azure Keyvault to fetch secrets from'
+    required: true
+  secret-keys:
+    description: 'Name of the keys to fetch from Azure Keyvault, separated by commas'
+    required: true
+
+outputs:
+  secret-values:
+    description: 'The values of the fetched secrets'
+    value: ${{ steps.fetch.outputs.value }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: fetch
+      name: Fetch Secret from Azure Keyvault
+      shell: bash
+      env:
+        KEYS: ${{ inputs.secret-keys }}
+      run: |
+        echo -n "{" > ${RUNNER_TEMP}/buffer.json
+        while IFS='=' read -r output_key secret_key; do
+          # Skip empty lines and comments
+          [[ -z "$output_key" || "$secret_key" =~ ^# ]] && continue
+          # We expect a pair, but if only one value is provided, use it as the output key also
+          if [[ -z "$secret_key" ]]; then
+            secret_key="$output_key"
+          fi
+
+          echo -n "\"$output_key\": " >> ${RUNNER_TEMP}/buffer.json
+          echo "::add-mask::$(az keyvault secret show --name "$secret_key" --vault-name "${{ inputs.az-keyvault-name }}" --query value -o tsv)"  | perl -pe 's/%/%25/g;s/\n/%0A/g;s/\r/%0D/g'
+          echo
+          az keyvault secret show --name "$secret_key" --vault-name "${{ inputs.az-keyvault-name }}" --query value | tr -d '\n' >> ${RUNNER_TEMP}/buffer.json
+          echo -n "," >> ${RUNNER_TEMP}/buffer.json
+
+        done <<< "$KEYS"
+        echo -n "}" >> ${RUNNER_TEMP}/buffer.json
+
+        OUTPUT=$(cat ${RUNNER_TEMP}/buffer.json | jq -ncf /dev/stdin)
+        echo "::add-mask::$OUTPUT" | perl -pe 's/%/%25/g'
+        echo "value=$OUTPUT" >> $GITHUB_OUTPUT

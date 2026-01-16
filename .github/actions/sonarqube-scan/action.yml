@@ -1,0 +1,80 @@
+name: 'SonarQube Scan'
+description: 'Performs SonarQube scan and quality gate check'
+
+inputs:
+  az-keyvault-name:
+    description: 'Azure Key Vault name'
+    required: true
+  az-secret-sonarqube-url:
+    description: 'Azure Key Vault secret name for SonarQube URL'
+    required: true
+  az-secret-sonarqube-token:
+    description: 'Azure Key Vault secret name for SonarQube token'
+    required: true
+  project-name:
+    description: 'SonarQube project name'
+    required: true
+  scanner-version:
+    description: 'SonarQube scanner version'
+    required: true
+  scanner-binaries-url:
+    description: 'SonarQube scanner binaries URL'
+    required: false
+  skip-quality-gate:
+    description: 'Skip SonarQube quality gate check'
+    required: false
+    default: 'false'
+  java-binaries:
+    description: 'Path to Java binaries'
+    required: false
+    default: 'target/classes'
+  java-test-binaries:
+    description: 'Path to Java test binaries'
+    required: false
+    default: 'target/test-classes'
+  additional-args:
+    description: 'Additional SonarQube scanner arguments'
+    required: false
+    default: ''
+
+outputs:
+  quality-gate-status:
+    description: 'Status of the quality gate (PASSED or FAILED)'
+    value: ${{ steps.sonarqube-quality-gate.outputs.quality-gate-status }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Retrieve SonarQube URL from Azure Key Vault
+      id: get-sonarqube-url
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-sonarqube-url }}
+
+    - name: Retrieve SonarQube token from Azure Key Vault
+      id: get-sonarqube-token
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-sonarqube-token }}
+          
+    - name: SonarQube scan
+      id: sonarqube-scan
+      uses: SonarSource/sonarqube-scan-action@v4
+      with:
+        scannerVersion: ${{ inputs.scanner-version }}
+        scannerBinariesUrl: ${{ inputs.scanner-binaries-url }}
+      env:
+        SONAR_TOKEN: ${{ steps.get-sonarqube-token.outputs.AZURE_SECRET }}
+        SONAR_HOST_URL: ${{ steps.get-sonarqube-url.outputs.AZURE_SECRET }} 
+
+    - name: SonarQube quality gate
+      id: sonarqube-quality-gate
+      if: ${{ inputs.skip-quality-gate == 'false' }}
+      uses: SonarSource/sonarqube-quality-gate-action@v1
+      env:
+        SONAR_TOKEN: ${{ steps.get-sonarqube-token.outputs.AZURE_SECRET }}
+        SONAR_HOST_URL: ${{ steps.get-sonarqube-url.outputs.AZURE_SECRET }}

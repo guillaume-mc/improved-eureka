@@ -1,0 +1,54 @@
+name: 'Prisma Cloud Security Scan'
+description: 'Scans a Docker image for security vulnerabilities using Prisma Cloud'
+inputs:
+  az-keyvault-name:
+    description: 'Azure Key Vault name containing Prisma Cloud credentials'
+    required: true
+  az-secret-prisma-url:
+    description: 'Key Vault secret name for Prisma Cloud console URL'
+    required: true
+  az-secret-prisma-access-key-id:
+    description: 'Key Vault secret name for Prisma Cloud access key ID'
+    required: true
+  az-secret-prisma-access-key-secret:
+    description: 'Key Vault secret name for Prisma Cloud access key secret'
+    required: true
+  image-name:
+    description: 'Full path to Docker image to scan (including tag)'
+    required: true
+  
+runs:
+  using: "composite"
+  steps:
+    - name: Retrieve Prisma Cloud URL from Azure Key Vault
+      id: get-prisma-url
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-prisma-url }}
+          
+    - name: Retrieve Prisma Cloud access key ID from Azure Key Vault
+      id: get-prisma-access-key-id
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-prisma-access-key-id }}
+          
+    - name: Retrieve Prisma Cloud access key secret from Azure Key Vault
+      id: get-prisma-access-key-secret
+      shell: bash
+      run: |
+        retrieve-keyvault-secret.sh \
+          ${{ inputs.az-keyvault-name }} \
+          ${{ inputs.az-secret-prisma-access-key-secret }}
+          
+    - name: Prisma Cloud security scan
+      id: security-scan
+      uses: PaloAltoNetworks/prisma-cloud-scan@v1.5
+      with:
+        pcc_console_url: ${{ steps.get-prisma-url.outputs.AZURE_SECRET }}
+        pcc_user: ${{ steps.get-prisma-access-key-id.outputs.AZURE_SECRET }}
+        pcc_pass: ${{ steps.get-prisma-access-key-secret.outputs.AZURE_SECRET }}
+        image_name: ${{ inputs.image-name }}
